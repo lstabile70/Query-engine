@@ -57,7 +57,7 @@ la sintassi SQL: se il browser non raggiunge il CDN, le query restano in chiaro.
 
 ## Provarla sul tuo computer
 
-Serve Python 3.11 o superiore.
+Serve Python 3.10 o superiore. Le istruzioni passo per passo sono in `ISTRUZIONI.txt`.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate

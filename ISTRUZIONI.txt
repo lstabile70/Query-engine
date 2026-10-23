@@ -1,0 +1,252 @@
+CHAT SQL (Query-engine) - ISTRUZIONI PER IL PRIMO AVVIO
+=======================================================
+
+Chat SQL e' un'applicazione web: scrivi una domanda in italiano, Claude esplora
+il database e ti propone la query SQL che risponde. La query la esegui tu con
+il pulsante "Esegui" e puoi salvarla in un progetto.
+
+Queste istruzioni sono pensate per Windows (PowerShell). Dove i comandi sono
+diversi per macOS e Linux, c'e' una nota. Per i dettagli tecnici vedi README.md.
+
+
+-------------------------------------------------------------------------------
+1. COSA SERVE
+-------------------------------------------------------------------------------
+
+  - Python 3.10 o superiore         https://www.python.org/downloads/
+    (durante l'installazione su Windows spunta "Add python.exe to PATH")
+  - Git                             https://git-scm.com/downloads
+  - Un account Anthropic con un po' di credito, per la chiave API
+                                    https://platform.claude.com
+  - Il database da interrogare, con un utente che puo' SOLO LEGGERE
+    (vedi il punto 5). Per provare senza un tuo database c'e' un database
+    di esempio (punto 6).
+  - Solo per SQL Server: il driver "ODBC Driver 17 (o 18) for SQL Server".
+    Per controllare se c'e', in PowerShell:
+        Get-OdbcDriver -Platform 64-bit | Where-Object Name -like '*SQL Server*'
+    Se manca: https://learn.microsoft.com/sql/connect/odbc/download-odbc-driver-for-sql-server
+
+
+-------------------------------------------------------------------------------
+2. SCARICARE IL CODICE
+-------------------------------------------------------------------------------
+
+Il repository e' privato: serve che il proprietario ti abbia dato accesso.
+
+    cd D:\src
+    git clone https://github.com/lstabile70/Query-engine.git
+    cd Query-engine
+
+Tutti i comandi che seguono vanno lanciati da questa cartella.
+
+
+-------------------------------------------------------------------------------
+3. AMBIENTE VIRTUALE E LIBRERIE
+-------------------------------------------------------------------------------
+
+L'ambiente virtuale (cartella .venv) contiene Python e le librerie solo per
+questo progetto.
+
+    python -m venv .venv
+    .venv\Scripts\Activate.ps1
+    pip install -r requirements.txt
+
+Dopo il secondo comando il prompt deve iniziare con (.venv).
+L'attivazione vale solo per quella finestra: in ogni nuova finestra di
+PowerShell va ripetuta (.venv\Scripts\Activate.ps1), sempre da questa cartella.
+
+  - Se Activate.ps1 da' un errore sulla "execution policy", lancia prima:
+        Set-ExecutionPolicy -Scope Process Bypass
+  - macOS / Linux: al posto di .venv\Scripts\Activate.ps1 usa
+        source .venv/bin/activate
+
+
+-------------------------------------------------------------------------------
+4. CONFIGURAZIONE: IL FILE .env
+-------------------------------------------------------------------------------
+
+La configurazione sta nel file .env, che NON va mai messo su git (contiene
+chiavi e password; .gitignore lo esclude gia').
+
+    Copy-Item .env.example .env
+    notepad .env
+
+    (macOS / Linux: cp .env.example .env  e poi aprilo con un editor)
+
+Imposta queste righe:
+
+  ANTHROPIC_API_KEY=sk-ant-...
+      La chiave API. Su https://platform.claude.com vai in Settings > API Keys,
+      "Create Key" e copiala subito: dopo non si rivede piu'. Le chiamate si
+      pagano a credito (Settings > Billing). Non incollarla mai in chat o in
+      file che finiscono su git.
+
+  DATABASE_URL=...
+      Il database principale, con l'utente in sola lettura. Esempi:
+        SQL Server:  mssql+pyodbc://utente:password@server/NomeDatabase?driver=ODBC+Driver+17+for+SQL+Server
+        PostgreSQL:  postgresql://utente:password@server:5432/nomedb
+        MySQL:       mysql://utente:password@server:3306/nomedb
+        SQLite:      sqlite:///demo.db
+      Se la password contiene @ : / # % va codificata (@ = %40, # = %23,
+      : = %3A, / = %2F, % = %25), oppure scegli una password senza questi
+      caratteri.
+
+  APP_PASSWORD=...
+      La password per entrare nell'app dal browser (il nome utente e'
+      indifferente).
+
+Per aggiungere altri database dalla pagina "Connessioni" servono anche:
+
+  ADMIN_PASSWORD=...
+      Una seconda password, diversa da APP_PASSWORD: serve per creare,
+      modificare ed eliminare connessioni.
+
+  CHIAVE_CIFRATURA=...
+      Cifra le password dei database salvate nell'app. Generala con
+      (con il venv attivo):
+          python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      Copia la riga che esce nel .env e CONSERVALA in un posto sicuro: se la
+      perdi o la cambi, le connessioni salvate vanno reinserite.
+
+Le altre righe di .env.example sono facoltative (modello di Claude, limiti di
+righe, timeout, ...): la spiegazione e' accanto a ciascuna.
+
+
+-------------------------------------------------------------------------------
+5. UTENTE IN SOLA LETTURA SUL DATABASE (IMPORTANTE)
+-------------------------------------------------------------------------------
+
+L'app accetta solo SELECT, ma la vera protezione e' un utente del database che
+non puo' modificare niente. Non usare mai utenti amministratori (sa, dbo,
+sysadmin, l'autenticazione Windows di un amministratore, ...).
+
+SQL Server (da SSMS, con un utente amministratore; scegli tu la password):
+
+    CREATE LOGIN chat_sql WITH PASSWORD = 'UnaPasswordRobusta!2026', CHECK_POLICY = ON;
+    USE NomeDatabase;
+    CREATE USER chat_sql FOR LOGIN chat_sql;
+    ALTER ROLE db_datareader ADD MEMBER chat_sql;
+
+Per PostgreSQL e MySQL gli script sono nel README ("Collegare il tuo database").
+La pagina "Connessioni" > "Prova" avvisa se l'utente puo' scrivere.
+
+
+-------------------------------------------------------------------------------
+6. (FACOLTATIVO) PROVARE CON IL DATABASE DI ESEMPIO
+-------------------------------------------------------------------------------
+
+Per provare l'app senza un tuo database:
+
+    python esempio\crea_demo.py
+
+Crea demo.db (clienti, prodotti, ordini inventati). Nel .env metti:
+
+    DATABASE_URL=sqlite:///demo.db
+
+
+-------------------------------------------------------------------------------
+7. AVVIARE L'APPLICAZIONE
+-------------------------------------------------------------------------------
+
+Con il venv attivo e dalla cartella del progetto:
+
+    python -m uvicorn app.main:app --env-file .env --port 8080 --reload
+
+Quando compare "Uvicorn running on http://127.0.0.1:8080" apri nel browser:
+
+    http://localhost:8080
+
+Inserisci APP_PASSWORD (nome utente qualsiasi).
+
+  - --reload riavvia il server da solo quando cambia il codice. Le modifiche
+    al .env invece richiedono sempre un riavvio: Ctrl+C nella finestra del
+    server e poi di nuovo il comando qui sopra.
+  - La finestra di PowerShell del server deve restare aperta.
+  - Se la porta 8080 e' occupata, usa un'altra porta (es. --port 8090).
+
+
+-------------------------------------------------------------------------------
+8. PRIMO USO
+-------------------------------------------------------------------------------
+
+  - Chat: scrivi una domanda, Claude esplora il database (dettagli in
+    "Esplorazione del database") e propone la query. "Esegui" mostra i
+    risultati (con "Scarica CSV"); i risultati non vengono mai inviati a Claude.
+  - Salva: mette la query in un progetto. I progetti sono nel menu a sinistra;
+    le query si trascinano da un progetto all'altro con il mouse.
+  - Selettore in cima al menu: sceglie su quale database lavorare. Ogni
+    database ha i suoi progetti.
+  - Connessioni: aggiunge altri database (serve ADMIN_PASSWORD). Usa sempre
+    "Prova connessione" prima di salvare.
+  - Impostazioni: modello di Claude ed effort (Opus e' il piu' preciso,
+    Sonnet e Haiku costano meno).
+  - Consumi: spesa stimata. Il saldo esatto e' nella console di Anthropic.
+  - Regole di business che il database non dice (cosa conta come "fatturato",
+    quali stati sono validi, ...): scrivile in contesto.md, partendo da
+    contesto.md.esempio. Migliorano molto le query.
+
+
+-------------------------------------------------------------------------------
+9. FILE CREATI DALL'APP
+-------------------------------------------------------------------------------
+
+Nella cartella del progetto l'app crea (sono esclusi da git):
+
+    app.db             connessioni, progetti e query salvate (solo l'SQL,
+                       mai i risultati; le password dei database sono cifrate)
+    consumi.db         token e costo stimato di ogni chiamata a Claude
+    impostazioni.json  modello ed effort scelti dalla pagina Impostazioni
+
+Fanne una copia ogni tanto: contengono il tuo lavoro.
+
+
+-------------------------------------------------------------------------------
+10. AGGIORNARE A UNA VERSIONE NUOVA
+-------------------------------------------------------------------------------
+
+    git pull
+    .venv\Scripts\Activate.ps1
+    pip install -r requirements.txt
+
+Poi riavvia il server (Ctrl+C e di nuovo il comando del punto 7). Al primo
+avvio l'app aggiorna da sola i propri archivi.
+
+
+-------------------------------------------------------------------------------
+11. PROBLEMI FREQUENTI
+-------------------------------------------------------------------------------
+
+"uvicorn non e' riconosciuto" / "No module named uvicorn" / "No module named ..."
+    Il venv non e' attivo o sei nella cartella sbagliata. Vai nella cartella
+    del progetto e lancia .venv\Scripts\Activate.ps1 (il prompt deve
+    mostrare (.venv)). Se mancano librerie: pip install -r requirements.txt
+
+"can't open file ... crea_demo.py: No such file or directory"
+    Sei in un'altra cartella: cd nella cartella del progetto.
+
+"[WinError 10013]" o "[WinError 10048]" all'avvio
+    La porta e' gia' usata, spesso da un server lanciato prima in un'altra
+    finestra. Chiudilo con Ctrl+C in quella finestra, oppure usa un'altra
+    porta (--port 8090).
+
+{"detail":"Not authenticated"} nel browser
+    Ricarica la pagina e inserisci APP_PASSWORD quando il browser la chiede.
+
+"Errore dall'API di Claude (400)"
+    Di solito il credito Anthropic e' finito (o non ancora caricato):
+    Settings > Billing su https://platform.claude.com.
+
+"Chiave API di Anthropic non valida"
+    Controlla ANTHROPIC_API_KEY nel .env (niente spazi o virgolette) e
+    riavvia il server.
+
+"Login failed for user ..." / "Data source name not found" (SQL Server)
+    Utente o password errati, oppure nome del driver ODBC sbagliato nella
+    stringa (deve coincidere con uno di quelli installati, vedi punto 1).
+
+"Impossibile decifrare la connessione: CHIAVE_CIFRATURA e' cambiata?"
+    La chiave nel .env non e' quella con cui sono state salvate le
+    connessioni: rimetti quella originale, oppure reinserisci le connessioni.
+
+La pagina mostra ancora la versione vecchia dopo un aggiornamento
+    Ricarica con Ctrl+F5.
