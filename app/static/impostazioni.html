@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Impostazioni</title>
+<link rel="stylesheet" href="/static/stile.css">
+<script src="/static/menu.js"></script>
+<style>
+  .scorrimento { flex: 1; overflow-y: auto; }
+  .pagina { max-width: 880px; margin: 0 auto; padding: 24px; }
+  .sezione-imp { padding: 20px; margin-bottom: 16px; }
+  .sezione-imp h2 { margin: 0 0 4px; font-size: 16px; font-weight: 650; }
+  .sezione-imp > p { margin: 0 0 16px; color: var(--tenue); font-size: 14px; }
+
+  .opzioni-modello { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  @media (max-width: 640px) { .opzioni-modello { grid-template-columns: 1fr; } }
+  .scelta { position: relative; display: block; cursor: pointer; padding: 14px 16px 14px 44px; border-radius: 10px;
+            border: 1px solid var(--bordo-forte); background: var(--pannello); }
+  .scelta:hover { border-color: var(--tenue); }
+  .scelta input { position: absolute; left: 16px; top: 17px; margin: 0; accent-color: var(--accento); width: 16px; height: 16px; }
+  .scelta:has(input:checked) { border-color: var(--accento); background: var(--accento-tenue); box-shadow: 0 0 0 1px var(--accento); }
+  .scelta:has(input:focus-visible) { outline: 2px solid var(--accento); outline-offset: 2px; }
+  .scelta .nome { font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .scelta .descrizione { color: var(--tenue); font-size: 13px; margin-top: 2px; }
+  .scelta .prezzo { font-size: 12.5px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .targhetta { font-size: 11px; font-weight: 500; padding: 1px 7px; border-radius: 999px; background: var(--codice);
+               color: var(--tenue); border: 1px solid var(--bordo); }
+
+  .opzioni-effort { display: flex; border: 1px solid var(--bordo-forte); border-radius: 10px; overflow: hidden; }
+  .opzioni-effort label { flex: 1; text-align: center; padding: 9px 6px; cursor: pointer; font-size: 14px;
+                          border-right: 1px solid var(--bordo-forte); background: var(--pannello); user-select: none; }
+  .opzioni-effort label:last-child { border-right: none; }
+  .opzioni-effort label:hover { background: var(--pannello-2); }
+  .opzioni-effort input { position: absolute; opacity: 0; pointer-events: none; }
+  .opzioni-effort label:has(input:checked) { background: var(--accento); color: var(--accento-testo); font-weight: 600; }
+  .opzioni-effort label:has(input:focus-visible) { outline: 2px solid var(--accento); outline-offset: -3px; }
+  .spiegazione-effort { margin-top: 10px; font-size: 14px; color: var(--tenue); min-height: 1.5em; }
+
+  .azioni-imp { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+  .azioni-imp .stato { margin-right: auto; font-size: 13.5px; }
+  .stato.ok { color: var(--ok); }
+
+  @media (max-width: 900px) {
+    .pagina { padding: 16px 14px; }
+    .sezione-imp { padding: 16px; }
+    .opzioni-effort { flex-wrap: wrap; }
+    .opzioni-effort label { flex: 1 0 33%; border-bottom: 1px solid var(--bordo-forte); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="menu" id="menu"></aside>
+  <div class="contenuto">
+    <header class="barra">
+      <button class="bottone icona-sola hamburger" type="button"></button>
+      <div>
+        <h1>Impostazioni</h1>
+        <p>Modello e livello di ragionamento usati per le prossime domande.</p>
+      </div>
+    </header>
+    <div class="scorrimento">
+      <main class="pagina">
+        <form id="form">
+          <section class="scheda sezione-imp">
+            <h2>Modello</h2>
+            <p>Il modello di Claude che esplora il database e scrive la query. I prezzi sono in dollari per milione di token.</p>
+            <div class="opzioni-modello" id="modelli" role="radiogroup" aria-label="Modello"></div>
+          </section>
+          <section class="scheda sezione-imp">
+            <h2>Effort</h2>
+            <p>Quanto Claude ragiona e verifica prima di rispondere: più è alto, più la risposta è accurata ma lenta e costosa.</p>
+            <div class="opzioni-effort" id="effort" role="radiogroup" aria-label="Effort"></div>
+            <div class="spiegazione-effort" id="spiegazione-effort"></div>
+          </section>
+          <div class="azioni-imp">
+            <span class="stato nota" id="stato" role="status"></span>
+            <button class="bottone" id="ripristina" type="button"></button>
+            <button class="bottone primario" id="salva" type="submit"></button>
+          </div>
+        </form>
+      </main>
+    </div>
+  </div>
+</div>
+<script>
+const form = document.getElementById("form");
+const salva = document.getElementById("salva");
+const ripristina = document.getElementById("ripristina");
+const stato = document.getElementById("stato");
+let dati = null;  // l'ultima risposta del server
+
+salva.innerHTML = icona("ok") + "<span>Salva</span>";
+ripristina.innerHTML = icona("ripristina") + "<span>Ripristina predefiniti</span>";
+
+const scelto = nome => form.elements[nome]?.value;
+
+function prezzo(p) {
+  if (!p) return "Prezzo non disponibile";
+  const f = v => "$ " + (v < 1 ? v.toFixed(2) : v.toFixed(v % 1 ? 2 : 0));
+  return `Input ${f(p.input)} · Output ${f(p.output)} · Cache ${f(p.cache_lettura)}`;
+}
+
+function mostra(d) {
+  dati = d;
+  const modelli = document.getElementById("modelli");
+  modelli.replaceChildren(...d.modelli.map(m => {
+    const radio = el("input", { type: "radio", name: "modello", value: m.id, checked: m.id === d.modello });
+    const nome = el("div", { className: "nome", textContent: m.nome });
+    if (m.id === d.predefiniti.modello) nome.append(el("span", { className: "targhetta", textContent: "predefinito" }));
+    return el("label", { className: "scelta" }, radio, nome,
+      el("div", { className: "descrizione", textContent: m.descrizione }),
+      el("div", { className: "prezzo", textContent: prezzo(m.prezzi) }));
+  }));
+
+  const effort = document.getElementById("effort");
+  effort.replaceChildren(...d.effort_disponibili.map(e => el("label", { title: e.descrizione },
+    el("input", { type: "radio", name: "effort", value: e.id, checked: e.id === d.effort }),
+    e.nome)));
+  aggiornaStato();
+}
+
+function aggiornaStato() {
+  const e = dati.effort_disponibili.find(x => x.id === scelto("effort"));
+  const predefinito = scelto("effort") === dati.predefiniti.effort ? " (predefinito)" : "";
+  document.getElementById("spiegazione-effort").textContent = e ? `${e.nome}${predefinito}: ${e.descrizione}` : "";
+  const modificato = scelto("modello") !== dati.modello || scelto("effort") !== dati.effort;
+  salva.disabled = !modificato;
+  ripristina.disabled = dati.modello === dati.predefiniti.modello && dati.effort === dati.predefiniti.effort && !modificato;
+  if (modificato) { stato.className = "stato nota"; stato.textContent = "Modifiche non salvate."; }
+}
+
+async function chiama(metodo, corpo) {
+  const r = await fetch("/api/impostazioni", {
+    method: metodo, headers: { "Content-Type": "application/json" }, body: corpo ? JSON.stringify(corpo) : undefined,
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || `Errore ${r.status}`);
+  return d;
+}
+
+async function esegui(azione, messaggio) {
+  salva.disabled = ripristina.disabled = true;
+  try {
+    mostra(await azione());
+    stato.className = "stato ok";
+    stato.textContent = messaggio;
+    aggiornaInfo();
+  } catch (e) {
+    stato.className = "stato errore";
+    stato.textContent = e.message;
+    aggiornaStato();
+  }
+}
+
+form.addEventListener("change", aggiornaStato);
+form.addEventListener("submit", evento => {
+  evento.preventDefault();
+  esegui(() => chiama("PUT", { modello: scelto("modello"), effort: scelto("effort") }),
+    "Salvato: vale dalla prossima domanda.");
+});
+ripristina.onclick = () => esegui(() => chiama("DELETE"), "Ripristinati i valori del file .env.");
+
+chiama("GET").then(mostra).catch(e => { stato.className = "stato errore"; stato.textContent = e.message; });
+</script>
+</body>
+</html>

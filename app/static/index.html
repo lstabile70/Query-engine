@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chat SQL</title>
+<link rel="stylesheet" href="/static/stile.css">
+<!-- Colori della sintassi SQL: se il CDN non risponde, il codice resta in chiaro -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" defer></script>
+<script src="/static/menu.js"></script>
+<script src="/static/componenti.js"></script>
+<style>
+  .scorrimento { flex: 1; overflow-y: auto; }
+  .chat { max-width: 880px; margin: 0 auto; padding: 24px 24px 8px; }
+
+  .benvenuto { text-align: center; padding: 48px 8px 16px; }
+  .benvenuto .logo-grande { width: 52px; height: 52px; border-radius: 14px; background: var(--accento-tenue);
+                            color: var(--accento); display: inline-grid; place-items: center; margin-bottom: 14px; }
+  .benvenuto .logo-grande svg { width: 26px; height: 26px; }
+  .benvenuto h2 { margin: 0 0 6px; font-size: 22px; font-weight: 650; }
+  .benvenuto p { margin: 0 auto 24px; color: var(--tenue); max-width: 520px; }
+  .esempi { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; text-align: left; }
+  .esempio { font: inherit; font-size: 14px; text-align: left; padding: 12px 14px; cursor: pointer; color: var(--testo);
+             background: var(--pannello); border: 1px solid var(--bordo); border-radius: var(--raggio); }
+  .esempio:hover { border-color: var(--accento); background: var(--accento-tenue); }
+
+  .msg { margin: 18px 0; }
+  .utente { background: var(--accento); color: var(--accento-testo); padding: 10px 14px; border-radius: 16px 16px 4px 16px;
+            margin-left: auto; width: fit-content; max-width: 80%; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .claude { padding: 16px; }
+  .claude > p { margin: 12px 0; white-space: pre-wrap; }
+  .claude > p:first-child { margin-top: 0; }
+  .intestazione-sql { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .intestazione-sql .nota { font-weight: 600; text-transform: uppercase; letter-spacing: .05em; font-size: 11.5px; }
+  .azioni { display: flex; gap: 8px; flex-wrap: wrap; }
+  details { margin-top: 14px; border-top: 1px solid var(--bordo); padding-top: 10px; }
+  details summary { cursor: pointer; color: var(--tenue); font-size: 13px; }
+  details pre.sql { margin-top: 8px; font-size: 12px; }
+  details .esito-errore { border-left: 3px solid var(--errore); }
+  .costo { margin-top: 10px; text-align: right; }
+  .msg.errore-box { padding: 12px 14px; background: var(--errore-tenue); color: var(--errore); border-radius: var(--raggio); }
+
+  .attesa { display: flex; align-items: center; gap: 10px; color: var(--tenue); padding: 12px 16px; width: fit-content; }
+  .puntini { display: inline-flex; gap: 4px; }
+  .puntini i { width: 6px; height: 6px; border-radius: 50%; background: var(--accento); animation: pulsa 1.2s infinite ease-in-out; }
+  .puntini i:nth-child(2) { animation-delay: .15s; } .puntini i:nth-child(3) { animation-delay: .3s; }
+  @keyframes pulsa { 0%, 80%, 100% { opacity: .25; transform: scale(.8); } 40% { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .puntini i { animation: none; opacity: .7; } }
+
+  .compositore { padding: 12px 24px 18px; background: linear-gradient(transparent, var(--bg) 30%); }
+  .compositore form { max-width: 880px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; padding: 8px;
+                      background: var(--pannello); border: 1px solid var(--bordo-forte); border-radius: 14px; box-shadow: var(--ombra); }
+  .compositore form:focus-within { border-color: var(--accento); }
+  .compositore textarea { flex: 1; resize: none; border: 0; outline: none; background: transparent; color: var(--testo);
+                          font: inherit; padding: 8px 6px; max-height: 200px; min-height: 40px; }
+  .compositore .bottone.primario { padding: 9px; border-radius: 10px; }
+  .compositore .nota { max-width: 880px; margin: 6px auto 0; text-align: center; font-size: 12px; }
+
+  @media (max-width: 900px) {
+    .chat { padding: 16px 14px 4px; }
+    .compositore { padding: 8px 12px 12px; }
+    .utente { max-width: 90%; }
+    .benvenuto { padding-top: 24px; }
+    .barra .testo-bottone { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="menu" id="menu"></aside>
+  <div class="contenuto">
+    <header class="barra">
+      <button class="bottone icona-sola hamburger" type="button"></button>
+      <div>
+        <h1>Chat</h1>
+        <p id="sottotitolo">Fai una domanda sui tuoi dati: Claude esplora il database e ti propone la query.</p>
+      </div>
+      <div class="azioni-barra">
+        <button class="bottone" id="nuova" type="button" title="Nuova conversazione"></button>
+      </div>
+    </header>
+    <div class="scorrimento" id="scorrimento">
+      <main class="chat" id="chat"></main>
+    </div>
+    <div class="compositore">
+      <form id="form">
+        <textarea id="domanda" rows="1" placeholder="Scrivi una domanda sui dati…" aria-label="Domanda" required></textarea>
+        <button class="bottone primario" id="invia" type="submit" aria-label="Invia"></button>
+      </form>
+      <p class="nota">Invio per inviare · Maiusc+Invio per andare a capo · Claude può sbagliare: controlla la query prima di usarla.</p>
+    </div>
+  </div>
+</div>
+<script>
+const chat = document.getElementById("chat");
+const scorrimento = document.getElementById("scorrimento");
+const form = document.getElementById("form");
+const campo = document.getElementById("domanda");
+const invia = document.getElementById("invia");
+const nuova = document.getElementById("nuova");
+let storia = [];  // scambi precedenti, rimandati al server per le domande di seguito
+
+const ESEMPI = [
+  "Quali sono le tabelle principali e cosa contengono?",
+  "Quali sono i 10 clienti che hanno speso di più?",
+  "Fatturato per mese negli ultimi 12 mesi",
+  "Quanti ordini ci sono per stato?",
+];
+
+invia.innerHTML = icona("invia");
+nuova.innerHTML = icona("nuovo") + '<span class="testo-bottone">Nuova conversazione</span>';
+
+function inFondo() { scorrimento.scrollTo({ top: scorrimento.scrollHeight, behavior: "smooth" }); }
+
+function benvenuto() {
+  const esempi = el("div", { className: "esempi" });
+  for (const testo of ESEMPI) {
+    const b = el("button", { className: "esempio", type: "button", textContent: testo });
+    b.onclick = () => { campo.value = testo; adatta(); form.requestSubmit(); };
+    esempi.append(b);
+  }
+  const logo = el("div", { className: "logo-grande" });
+  logo.innerHTML = icona("database");
+  chat.replaceChildren(el("section", { className: "benvenuto" }, logo,
+    el("h2", { textContent: "Che cosa vuoi sapere dai tuoi dati?" }),
+    el("p", { textContent: "Scrivi una domanda in italiano: Claude esplora il database, scrive la query SQL e te la propone. Puoi eseguirla per vedere i risultati." }),
+    esempi));
+}
+
+// Il progetto usato l'ultima volta viene riproposto (comodità personale, resta nel browser)
+const CHIAVE_ULTIMO_PROGETTO = "nl2sql-ultimo-progetto";
+
+async function salvaQuery(dati, domanda, bottone) {
+  let elenco = [];
+  // I progetti del database su cui è stata scritta la risposta
+  try { elenco = await api(`/api/progetti?connessione_id=${dati.connessione_id}`); } catch { /* si può sempre creare un progetto nuovo */ }
+  let ultimo = null;
+  try { ultimo = Number(localStorage.getItem(CHIAVE_ULTIMO_PROGETTO)); } catch { }
+  const NUOVO = "__nuovo__";
+  const predefinito = elenco.some(p => p.id === ultimo) ? ultimo : elenco[0]?.id ?? NUOVO;
+
+  const salvata = await finestra({
+    titolo: "Salva la query", conferma: "Salva",
+    testo: "Si salvano la query, la domanda e la spiegazione, non i risultati.",
+    campi: [
+      { nome: "titolo", etichetta: "Titolo", valore: domanda.slice(0, 120), obbligatorio: true },
+      { nome: "progetto", etichetta: "Progetto", tipo: "scelta", valore: predefinito,
+        opzioni: [...elenco.map(p => ({ valore: p.id, testo: p.nome })), { valore: NUOVO, testo: "+ Nuovo progetto…" }] },
+      { nome: "nuovo", etichetta: "Nome del nuovo progetto", obbligatorio: true, segnaposto: "Es. Vendite 2025",
+        mostraSe: { campo: "progetto", valore: NUOVO } },
+    ],
+    azione: v => api("/api/query", {
+      ...(v.progetto === NUOVO ? { nuovo_progetto: v.nuovo, connessione_id: dati.connessione_id } : { progetto_id: Number(v.progetto) }),
+      titolo: v.titolo, domanda, sql: dati.sql, spiegazione: dati.spiegazione || "", modello: dati.modello,
+    }),
+  });
+  if (!salvata) return;
+  try { localStorage.setItem(CHIAVE_ULTIMO_PROGETTO, salvata.progetto_id); } catch { }
+  // Nel menu si apre la cartella dove è finita la query
+  const stato = statoProgetti();
+  if (!stato.aperti.includes(salvata.progetto_id)) stato.aperti.push(salvata.progetto_id);
+  salvaStatoProgetti({ ...stato, chiusa: false });
+  // Il pulsante diventa un collegamento alla query salvata
+  const link = conIcona("a", { className: "bottone", href: `/query/${salvata.id}`, title: `Apri «${salvata.titolo}»` }, "ok", "Salvata");
+  bottone.replaceWith(link);
+  ricaricaProgetti();
+}
+
+function rispostaClaude(dati, domanda) {
+  const box = el("div", { className: "msg scheda claude" });
+  if (dati.sql) {
+    const risultati = el("div", { className: "risultati" });
+    const salva = conIcona("button", { className: "bottone", type: "button" }, "salva", "Salva");
+    salva.onclick = () => salvaQuery(dati, domanda, salva);
+    box.append(
+      el("div", { className: "intestazione-sql" }, el("span", { className: "nota", textContent: "Query proposta" }),
+        el("div", { className: "azioni" }, salva, bottoneCopia(dati.sql), bottoneEsegui(dati.sql, risultati, "risultati.csv", dati.connessione_id))),
+      bloccoSql(dati.sql),
+      el("p", { textContent: dati.spiegazione }),
+      risultati);
+  } else {
+    box.append(el("p", { textContent: dati.testo }));
+  }
+  if (dati.passi && dati.passi.length) {
+    const dettagli = el("details", {}, el("summary", { textContent: `Esplorazione del database (${dati.passi.length} query)` }));
+    for (const p of dati.passi) {
+      const pre = bloccoSql((p.esito === "errore" ? "-- errore\n" : "") + p.sql);
+      if (p.esito === "errore") pre.classList.add("esito-errore");
+      dettagli.append(pre);
+    }
+    box.append(dettagli);
+  }
+  if (dati.costo_usd != null) {
+    box.append(el("div", { className: "nota costo", textContent: `Costo stimato: $ ${dati.costo_usd.toFixed(4)}` }));
+  }
+  return box;
+}
+
+function attesa() {
+  const secondi = el("span", { textContent: "" });
+  const box = el("div", { className: "msg scheda attesa" });
+  box.innerHTML = '<span class="puntini"><i></i><i></i><i></i></span>';
+  box.append(el("span", { textContent: "Claude sta esplorando il database…" }), secondi);
+  const inizio = Date.now();
+  const timer = setInterval(() => { secondi.textContent = `${Math.round((Date.now() - inizio) / 1000)} s`; }, 1000);
+  box.ferma = () => clearInterval(timer);
+  return box;
+}
+
+form.addEventListener("submit", async (evento) => {
+  evento.preventDefault();
+  const domanda = campo.value.trim();
+  if (!domanda || invia.disabled) return;
+  chat.querySelector(".benvenuto")?.remove();
+  campo.value = ""; adatta();
+  invia.disabled = nuova.disabled = true;
+  chat.append(el("div", { className: "msg utente", textContent: domanda }));
+  const box = attesa();
+  chat.append(box);
+  inFondo();
+  try {
+    const connessione = await prontaConnessione;
+    if (!connessione) throw new Error("Nessuna connessione configurata: aggiungi un database per iniziare.");
+    const dati = await api("/api/chiedi", { connessione_id: connessione.id, domanda, storia });
+    dati.connessione_id = connessione.id;  // Esegui e Salva useranno il database su cui è stata scritta
+    box.replaceWith(rispostaClaude(dati, domanda));
+    const risposta = dati.sql ? "```sql\n" + dati.sql + "\n```\n" + dati.spiegazione : dati.testo;
+    storia.push({ domanda, risposta });
+  } catch (e) {
+    box.replaceWith(el("div", { className: "msg errore-box", textContent: e.message }));
+  } finally {
+    box.ferma();
+  }
+  invia.disabled = nuova.disabled = false;
+  inFondo();
+  campo.focus();
+});
+
+// La casella cresce con il testo, fino a un massimo
+function adatta() { campo.style.height = "auto"; campo.style.height = Math.min(campo.scrollHeight, 200) + "px"; }
+campo.addEventListener("input", adatta);
+campo.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+});
+
+nuova.onclick = () => { storia = []; benvenuto(); campo.focus(); };
+
+benvenuto();
+campo.focus();
+// Nella barra in alto: su quale database si sta lavorando
+prontaConnessione.then(c => {
+  if (c) document.getElementById("sottotitolo").textContent = `Domande sul database ${c.nome} (${descriviConnessione(c)}).`;
+});
+</script>
+</body>
+</html>

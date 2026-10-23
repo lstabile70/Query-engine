@@ -1,0 +1,9 @@
+anthropic>=1.16,<2
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sqlalchemy>=2.0
+sqlglot>=30
+psycopg[binary]>=3.2
+pymysql>=1.1
+cryptography>=42
+pyodbc>=5

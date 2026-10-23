@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connessioni</title>
+<link rel="stylesheet" href="/static/stile.css">
+<script src="/static/menu.js"></script>
+<style>
+  .scorrimento { flex: 1; overflow-y: auto; }
+  .pagina { max-width: 880px; margin: 0 auto; padding: 24px; display: grid; gap: 12px; }
+  .avviso-pagina { padding: 14px 16px; border-radius: 10px; background: var(--accento-tenue); font-size: 14px; display: grid; gap: 6px; }
+  .avviso-pagina code, .avviso-pagina pre { font-family: var(--mono); font-size: 12.5px; }
+  .avviso-pagina pre { margin: 0; padding: 8px 10px; background: var(--codice); border-radius: 8px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .conn { padding: 14px 16px; }
+  .conn .testa { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .conn .icona-db { width: 36px; height: 36px; border-radius: 9px; background: var(--accento-tenue); color: var(--accento); display: grid; place-items: center; flex: none; }
+  .conn .titoli { flex: 1; min-width: 180px; }
+  .conn .nome { font-weight: 650; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .conn .azioni { display: flex; gap: 6px; flex-wrap: wrap; }
+  .targhetta { font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: 999px; background: var(--codice); color: var(--tenue); border: 1px solid var(--bordo); }
+  .targhetta.attiva { background: var(--accento-tenue); color: var(--accento); border-color: var(--accento); }
+  .targhetta.avviso { color: var(--errore); border-color: var(--errore); background: var(--errore-tenue); }
+  .esito { margin-top: 10px; font-size: 13.5px; display: grid; gap: 4px; }
+  .esito:empty { display: none; }
+  .esito .ok { color: var(--ok); }
+  .esito .attenzione { color: var(--errore); font-weight: 600; }
+  .esito .errore { overflow-wrap: anywhere; }
+
+  .editor { padding: 20px; display: grid; gap: 16px; }
+  .editor h2 { margin: 0; font-size: 17px; font-weight: 650; }
+  .editor fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 12px; }
+  .editor fieldset[hidden] { display: none; }
+  .righe-2 { display: grid; grid-template-columns: 1fr 140px; gap: 12px; }
+  .righe-2.uguali { grid-template-columns: 1fr 1fr; }
+  .campo input.stretto { max-width: 140px; }
+  .campo small { font-weight: 400; color: var(--tenue); font-size: 12.5px; }
+  .campo textarea { font: 13px/1.5 var(--mono); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--bordo-forte);
+                    background: var(--pannello-2); color: var(--testo); resize: vertical; min-height: 70px; width: 100%; }
+  .spunta { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; cursor: pointer; }
+  .spunta input { margin-top: 3px; accent-color: var(--accento); }
+  .spunta small { display: block; color: var(--tenue); font-size: 12.5px; }
+  .modi { display: inline-flex; border: 1px solid var(--bordo-forte); border-radius: 9px; overflow: hidden; width: fit-content; }
+  .modi label { padding: 7px 14px; cursor: pointer; font-size: 14px; background: var(--pannello); }
+  .modi label + label { border-left: 1px solid var(--bordo-forte); }
+  .modi input { position: absolute; opacity: 0; pointer-events: none; }
+  .modi label:has(input:checked) { background: var(--accento); color: var(--accento-testo); font-weight: 600; }
+  .modi label:has(input:focus-visible) { outline: 2px solid var(--accento); outline-offset: -3px; }
+  .piede-editor { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .piede-editor .spazio { flex: 1; }
+  .editor .errore-modulo:empty { display: none; }
+  @media (max-width: 640px) { .pagina { padding: 16px 14px; } .righe-2, .righe-2.uguali { grid-template-columns: 1fr; } .barra .testo-bottone { display: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="menu" id="menu"></aside>
+  <div class="contenuto">
+    <header class="barra">
+      <button class="bottone icona-sola hamburger" type="button"></button>
+      <div>
+        <h1>Connessioni</h1>
+        <p>I database a cui l'app si collega. Ognuno ha i suoi progetti e le sue query.</p>
+      </div>
+      <div class="azioni-barra">
+        <button class="bottone primario" id="nuova" type="button" hidden></button>
+      </div>
+    </header>
+    <div class="scorrimento">
+      <main class="pagina" id="contenuto"><p class="nota">Caricamento…</p></main>
+    </div>
+  </div>
+</div>
+<script>
+const contenuto = document.getElementById("contenuto");
+const bottoneNuova = document.getElementById("nuova");
+bottoneNuova.innerHTML = icona("nuovo") + '<span class="testo-bottone">Nuova connessione</span>';
+let stato = null;  // da /api/connessioni/stato: gestione attiva, tipi, driver ODBC
+
+// ---------- Password di amministrazione ----------
+// Resta solo in questa scheda del browser (sessionStorage) e viaggia nell'intestazione X-Password-Amministrazione
+const CHIAVE_ADMIN = "nl2sql-admin";
+let passwordAdmin = null;
+try { passwordAdmin = sessionStorage.getItem(CHIAVE_ADMIN); } catch { }
+
+async function apiAdmin(percorso, corpo, metodo = corpo === undefined ? "GET" : "POST") {
+  const r = await fetch(percorso, {
+    method: metodo,
+    headers: { "X-Password-Amministrazione": passwordAdmin || "", ...(corpo === undefined ? {} : { "Content-Type": "application/json" }) },
+    body: corpo === undefined ? undefined : JSON.stringify(corpo),
+  });
+  const dati = await r.json().catch(() => ({}));
+  if (r.status === 403) {
+    passwordAdmin = null;
+    try { sessionStorage.removeItem(CHIAVE_ADMIN); } catch { }
+  }
+  if (!r.ok) throw new Error(dati.detail || `Errore ${r.status}`);
+  return dati;
+}
+
+// Chiede la password di amministrazione, se non è già nota; true se l'utente l'ha data giusta
+async function sbloccaAdmin() {
+  if (passwordAdmin) return true;
+  const ok = await finestra({
+    titolo: "Password di amministrazione", conferma: "Continua",
+    testo: "Per gestire le connessioni serve la password di amministrazione (ADMIN_PASSWORD).",
+    campi: [{ nome: "password", etichetta: "Password", tipo: "password", obbligatorio: true }],
+    azione: async v => {
+      passwordAdmin = v.password;
+      await apiAdmin("/api/amministrazione/verifica", {});
+      try { sessionStorage.setItem(CHIAVE_ADMIN, v.password); } catch { }
+      return true;
+    },
+  });
+  return !!ok;
+}
+
+// ---------- Esito di una prova ----------
+function mostraEsito(contenitore, r) {
+  contenitore.replaceChildren();
+  if (!r.ok) {
+    contenitore.append(el("div", { className: "errore", textContent: `Collegamento non riuscito: ${r.errore}` }));
+    return;
+  }
+  contenitore.append(el("div", { className: "ok", textContent: `Collegamento riuscito in ${r.millisecondi} ms · ${r.versione}` }));
+  if (r.scrittura === true) {
+    contenitore.append(el("div", { className: "attenzione",
+      textContent: "Attenzione: questo utente può modificare il database. Usa un utente con soli permessi di lettura." }));
+  } else if (r.scrittura === false) {
+    contenitore.append(el("div", { className: "nota", textContent: "L'utente ha solo permessi di lettura." }));
+  } else {
+    contenitore.append(el("div", { className: "nota", textContent: "Permessi dell'utente non verificabili per questo tipo di database." }));
+  }
+}
+
+// ---------- Elenco ----------
+const nomeTipo = d => stato?.tipi.find(t => t.id === d)?.nome || d || "tipo sconosciuto";
+
+function scheda(c) {
+  const esito = el("div", { className: "esito", role: "status" });
+  const titolo = el("div", { className: "nome", textContent: c.nome });
+  if (c.id === connessioneAttiva?.id) titolo.append(el("span", { className: "targhetta attiva", textContent: "in uso" }));
+  if (c.origine === "env") titolo.append(el("span", { className: "targhetta", textContent: "dal file .env" }));
+  if (c.solo_metadati) titolo.append(el("span", { className: "targhetta", textContent: "solo metadati" }));
+  if (!c.configurata) titolo.append(el("span", { className: "targhetta avviso", textContent: "non configurata" }));
+  const dettaglio = [nomeTipo(c.dialetto), c.database, `${c.progetti} ${c.progetti === 1 ? "progetto" : "progetti"}, ${c.query} query`]
+    .filter(Boolean).join(" · ");
+
+  const azioni = el("div", { className: "azioni" });
+  const prova = conIcona("button", { className: "bottone", type: "button" }, "esegui", "Prova");
+  prova.onclick = async () => {
+    prova.disabled = true;
+    esito.replaceChildren(el("div", { className: "nota", textContent: "Collegamento in corso…" }));
+    try { mostraEsito(esito, await api(`/api/connessioni/${c.id}/prova`, {})); }
+    catch (e) { esito.replaceChildren(el("div", { className: "errore", textContent: e.message })); }
+    prova.disabled = false;
+  };
+  azioni.append(prova);
+  if (c.id !== connessioneAttiva?.id) {
+    const usa = conIcona("button", { className: "bottone", type: "button", title: "Usa questo database nella chat" }, "ok", "Usa");
+    usa.onclick = () => { ricordaConnessione(c.id); location.href = "/"; };
+    azioni.append(usa);
+  }
+  if (c.origine !== "env" && stato.gestione) {
+    const modifica = conIcona("button", { className: "bottone", type: "button" }, "modifica", "Modifica");
+    modifica.onclick = () => apriEditor(c);
+    const elimina = conIcona("button", { className: "bottone", type: "button", title: "Elimina", ariaLabel: `Elimina ${c.nome}` }, "cestino");
+    elimina.onclick = () => eliminaConnessione(c);
+    azioni.append(modifica, elimina);
+  }
+  const simbolo = el("div", { className: "icona-db" });
+  simbolo.innerHTML = icona("database");
+  return el("section", { className: "scheda conn" },
+    el("div", { className: "testa" }, simbolo, el("div", { className: "titoli" }, titolo,
+      el("div", { className: "nota", textContent: dettaglio })), azioni),
+    esito);
+}
+
+function avvisoGestione() {
+  if (stato.gestione) return "";
+  const box = el("div", { className: "avviso-pagina" },
+    el("strong", { textContent: "La gestione delle connessioni dall'interfaccia è disattivata." }));
+  if (stato.manca.includes("ADMIN_PASSWORD")) {
+    box.append(el("div", { textContent: "Imposta ADMIN_PASSWORD nel file .env: è la password che serve per creare, modificare ed eliminare connessioni." }));
+  }
+  if (stato.manca.includes("CHIAVE_CIFRATURA")) {
+    box.append(el("div", { textContent: "Imposta CHIAVE_CIFRATURA nel file .env: cifra le password dei database salvate nell'app. Si genera con:" }),
+      el("pre", { textContent: 'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"' }));
+  }
+  box.append(el("div", { className: "nota", textContent: "Poi riavvia il server." }));
+  return box;
+}
+
+function mostraElenco(messaggio) {
+  bottoneNuova.hidden = !stato.gestione;
+  const parti = [avvisoGestione()];
+  if (messaggio) parti.push(el("p", { className: "nota", role: "status", textContent: messaggio }));
+  if (!elencoConnessioni.length) parti.push(el("p", { className: "nota", textContent: "Nessuna connessione: creane una con «Nuova connessione»." }));
+  parti.push(...elencoConnessioni.map(scheda));
+  contenuto.replaceChildren(...parti);
+}
+
+async function eliminaConnessione(c) {
+  if (!(await sbloccaAdmin())) return;
+  const testo = c.progetti
+    ? `«${c.nome}» sarà eliminata insieme ai suoi ${c.progetti} progetti e alle loro ${c.query} query. Il database non viene toccato.`
+    : `La connessione «${c.nome}» sarà eliminata. Il database non viene toccato.`;
+  const r = await finestra({
+    titolo: "Eliminare la connessione?", testo, conferma: "Elimina", pericolo: true,
+    azione: () => apiAdmin(`/api/connessioni/${c.id}`, undefined, "DELETE"),
+  });
+  if (!r) return;
+  await ricaricaConnessioni();
+  mostraElenco(`Connessione «${c.nome}» eliminata.`);
+}
+
+// ---------- Editor ----------
+function campo(etichetta, controllo, aiuto) {
+  const l = el("label", { className: "campo" }, el("span", { textContent: etichetta }), controllo);
+  if (aiuto) l.append(el("small", { textContent: aiuto }));
+  return l;
+}
+const input = (nome, attributi = {}) => el("input", { name: nome, type: "text", autocomplete: "off", ...attributi });
+function spunta(nome, testo, aiuto, selezionata) {
+  const l = el("label", { className: "spunta" }, el("input", { type: "checkbox", name: nome, checked: !!selezionata }),
+    el("span", { textContent: testo }));
+  if (aiuto) l.lastChild.append(el("small", { textContent: aiuto }));
+  return l;
+}
+
+async function apriEditor(connessione) {
+  if (!(await sbloccaAdmin())) return;
+  let dati = { parametri: { modo: "campi", tipo: "mssql" }, solo_metadati: false, timeout_secondi: 15 };
+  if (connessione) {
+    try { dati = await apiAdmin(`/api/connessioni/${connessione.id}/parametri`); }
+    catch (e) { mostraElenco(e.message); return; }
+  }
+  const p = dati.parametri || {};
+  bottoneNuova.hidden = true;
+
+  const form = el("form", { className: "scheda editor", noValidate: true });
+  const modo = el("div", { className: "modi", role: "radiogroup", ariaLabel: "Come indicare il database" },
+    el("label", {}, el("input", { type: "radio", name: "modo", value: "campi", checked: p.modo !== "stringa" }), "Campi"),
+    el("label", {}, el("input", { type: "radio", name: "modo", value: "stringa", checked: p.modo === "stringa" }), "Stringa di connessione"));
+
+  const tipo = el("select", { name: "tipo" }, ...stato.tipi.map(t => el("option", { value: t.id, textContent: t.nome, selected: t.id === (p.tipo || "mssql") })));
+  const driver = el("select", { name: "driver" }, ...(stato.driver_odbc.length ? stato.driver_odbc : ["ODBC Driver 17 for SQL Server"])
+    .map(d => el("option", { value: d, textContent: d, selected: d === p.driver })));
+  const segnapostoPassword = dati.password_impostata ? "••••••  (lascia vuoto per non cambiarla)" : "";
+
+  const campiServer = el("fieldset", {},
+    el("div", { className: "righe-2" }, campo("Server", input("server", { value: p.server || "", placeholder: "Es. 192.168.2.106 o db.azienda.it" })),
+      campo("Porta", input("porta", { value: p.porta || "", inputMode: "numeric" }))));
+  const campiCredenziali = el("fieldset", {},
+    el("div", { className: "righe-2 uguali" }, campo("Utente", input("utente", { value: p.utente || "" })),
+      campo("Password", input("password", { type: "password", placeholder: segnapostoPassword }))),
+    el("p", { className: "nota", textContent: "Usa un utente con soli permessi di lettura: è la protezione più importante." }));
+  const campiSqlServer = el("fieldset", {},
+    campo("Driver ODBC", driver),
+    spunta("attendibile", "Considera attendibile il certificato del server", "TrustServerCertificate: serve con i certificati non firmati da un'autorità, tipici dei server interni.", p.attendibile));
+  const etichettaDatabase = el("span", { textContent: "Database" });
+  const campoDatabase = el("label", { className: "campo" }, etichettaDatabase, input("database", { value: p.database || "" }));
+  const gruppoCampi = el("fieldset", {}, campo("Tipo di database", tipo), campiServer, campoDatabase, campiCredenziali, campiSqlServer);
+
+  const stringa = el("textarea", { name: "stringa", rows: 3, value: p.modo === "stringa" ? p.stringa || "" : "",
+    placeholder: "postgresql://utente:password@server:5432/database" });
+  const gruppoStringa = el("fieldset", {}, campo("Stringa di connessione (formato SQLAlchemy)", stringa,
+    dati.password_impostata ? "La password salvata è mostrata come ***: lasciala così per non cambiarla." : "Es. mssql+pyodbc://utente:password@server/database?driver=ODBC+Driver+17+for+SQL+Server"));
+
+  const opzioni = el("fieldset", {},
+    spunta("solo_metadati", "Solo metadati", "Claude legge solo la struttura del database, mai i dati delle tabelle: nessun dato arriva ad Anthropic.", dati.solo_metadati),
+    campo("Timeout delle query (secondi)", input("timeout_secondi", { value: dati.timeout_secondi || 15, inputMode: "numeric", className: "stretto" })));
+
+  const esito = el("div", { className: "esito", role: "status" });
+  const errore = el("p", { className: "errore errore-modulo", role: "alert" });
+  const prova = conIcona("button", { className: "bottone", type: "button" }, "esegui", "Prova connessione");
+  const annulla = el("button", { className: "bottone", type: "button", textContent: "Annulla" });
+  const salva = conIcona("button", { className: "bottone primario", type: "submit" }, "ok", "Salva");
+
+  form.append(
+    el("h2", { textContent: connessione ? `Modifica «${connessione.nome}»` : "Nuova connessione" }),
+    campo("Nome", input("nome", { value: connessione ? dati.nome : "", placeholder: "Es. HDG PRE", maxLength: 120 })),
+    modo, gruppoCampi, gruppoStringa, opzioni, esito, errore,
+    el("div", { className: "piede-editor" }, prova, el("span", { className: "spazio" }), annulla, salva));
+
+  // Campi visibili secondo il modo e il tipo di database
+  function aggiorna() {
+    const perStringa = form.elements.modo.value === "stringa";
+    gruppoCampi.hidden = perStringa;
+    gruppoStringa.hidden = !perStringa;
+    const t = tipo.value;
+    campiServer.hidden = campiCredenziali.hidden = t === "sqlite";
+    campiSqlServer.hidden = t !== "mssql";
+    etichettaDatabase.textContent = t === "sqlite" ? "Percorso del file" : "Database";
+    form.elements.porta.placeholder = String(stato.tipi.find(x => x.id === t)?.porta || "");
+  }
+  form.addEventListener("change", aggiorna);
+  aggiorna();
+
+  const valori = () => {
+    const f = form.elements;
+    const numero = v => (v.trim() ? Number(v) : null);
+    return {
+      nome: f.nome.value.trim(), modo: f.modo.value, tipo: tipo.value, server: f.server.value.trim(),
+      porta: numero(f.porta.value), database: f.database.value.trim(), utente: f.utente.value.trim(),
+      password: f.password.value || null, driver: driver.value, attendibile: f.attendibile.checked,
+      stringa: f.stringa.value.trim(), solo_metadati: f.solo_metadati.checked,
+      timeout_secondi: numero(f.timeout_secondi.value) || 15,
+    };
+  };
+
+  prova.onclick = async () => {
+    errore.textContent = "";
+    prova.disabled = true;
+    esito.replaceChildren(el("div", { className: "nota", textContent: "Collegamento in corso…" }));
+    try { mostraEsito(esito, await apiAdmin("/api/connessioni/prova", { ...valori(), connessione_id: connessione?.id ?? null })); }
+    catch (e) { esito.replaceChildren(); errore.textContent = e.message; }
+    prova.disabled = false;
+  };
+  annulla.onclick = () => mostraElenco();
+  form.addEventListener("submit", async evento => {
+    evento.preventDefault();
+    errore.textContent = "";
+    salva.disabled = true;
+    try {
+      const salvata = connessione
+        ? await apiAdmin(`/api/connessioni/${connessione.id}`, valori(), "PUT")
+        : await apiAdmin("/api/connessioni", valori());
+      await ricaricaConnessioni();
+      mostraElenco(`Connessione «${salvata.nome}» salvata. Prova il collegamento dalla sua scheda.`);
+    } catch (e) {
+      errore.textContent = e.message;
+      salva.disabled = false;
+    }
+  });
+
+  contenuto.replaceChildren(form);
+  form.elements.nome.focus();
+}
+
+bottoneNuova.onclick = () => apriEditor(null);
+
+(async () => {
+  try {
+    [stato] = await Promise.all([api("/api/connessioni/stato"), prontaConnessione]);
+    mostraElenco();
+  } catch (e) {
+    contenuto.replaceChildren(el("p", { className: "errore", textContent: e.message }));
+  }
+})();
+</script>
+</body>
+</html>

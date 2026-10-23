@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Query salvata</title>
+<link rel="stylesheet" href="/static/stile.css">
+<!-- Colori della sintassi SQL: se il CDN non risponde, il codice resta in chiaro -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="/static/menu.js"></script>
+<script src="/static/componenti.js"></script>
+<style>
+  .scorrimento { flex: 1; overflow-y: auto; }
+  .pagina { max-width: 880px; margin: 0 auto; padding: 24px; }
+  .barra .titoli { min-width: 0; }
+  .barra h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .percorso { display: flex; align-items: center; gap: 6px; }
+  .percorso svg { width: 14px; height: 14px; }
+  .blocco { padding: 18px; margin-bottom: 16px; }
+  .etichetta-blocco { font-weight: 600; text-transform: uppercase; letter-spacing: .05em; font-size: 11.5px; color: var(--tenue); }
+  .domanda { margin: 6px 0 0; font-size: 15.5px; white-space: pre-wrap; }
+  .intestazione-sql { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .azioni { display: flex; gap: 8px; flex-wrap: wrap; }
+  .spiegazione { margin: 14px 0 0; white-space: pre-wrap; }
+  .dettagli-salvataggio { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+  .introvabile { text-align: center; padding: 60px 16px; }
+  @media (max-width: 900px) { .pagina { padding: 16px 14px; } .blocco { padding: 14px; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="menu" id="menu"></aside>
+  <div class="contenuto">
+    <header class="barra">
+      <button class="bottone icona-sola hamburger" type="button"></button>
+      <div class="titoli">
+        <h1 id="titolo">Query salvata</h1>
+        <p class="percorso" id="percorso"></p>
+      </div>
+      <div class="azioni-barra">
+        <button class="bottone icona-sola" id="altro" type="button" title="Azioni" aria-label="Azioni della query" hidden></button>
+      </div>
+    </header>
+    <div class="scorrimento">
+      <main class="pagina" id="contenuto"><p class="nota">Caricamento…</p></main>
+    </div>
+  </div>
+</div>
+<script>
+const id = Number(location.pathname.split("/").pop());
+const contenuto = document.getElementById("contenuto");
+const altro = document.getElementById("altro");
+altro.innerHTML = icona("puntini");
+let q = null;  // la query mostrata
+
+const data = iso => new Date(iso).toLocaleString("it-IT", { dateStyle: "medium", timeStyle: "short" });
+
+function intestazione() {
+  document.title = `${q.titolo} · Chat SQL`;
+  document.getElementById("titolo").textContent = q.titolo;
+  // Database › progetto
+  const percorso = document.getElementById("percorso");
+  percorso.innerHTML = icona("database");
+  percorso.append(el("span", { textContent: q.connessione }));
+  percorso.insertAdjacentHTML("beforeend", icona("freccia") + icona("cartella"));
+  percorso.append(el("span", { textContent: q.progetto }));
+}
+
+async function mostra() {
+  intestazione();
+  altro.hidden = false;
+  // Il menu passa al database della query, così mostra il suo progetto
+  prontaConnessione.then(() => usaConnessione(q.connessione_id));
+  const parti = [];
+
+  if (q.domanda) {
+    parti.push(el("section", { className: "scheda blocco" },
+      el("div", { className: "etichetta-blocco", textContent: "Domanda" }),
+      el("p", { className: "domanda", textContent: q.domanda })));
+  }
+
+  const risultati = el("div", { className: "risultati" });
+  const sezioneSql = el("section", { className: "scheda blocco" },
+    el("div", { className: "intestazione-sql" },
+      el("span", { className: "etichetta-blocco", textContent: "Query" }),
+      el("div", { className: "azioni" }, bottoneCopia(q.sql), bottoneEsegui(q.sql, risultati, nomeFileDa(q.titolo), q.connessione_id))),
+    bloccoSql(q.sql));
+  if (q.spiegazione) sezioneSql.append(el("p", { className: "spiegazione", textContent: q.spiegazione }));
+  sezioneSql.append(risultati);
+  parti.push(sezioneSql);
+
+  const dettagli = [`Salvata il ${data(q.creata)}`];
+  if (q.modificata !== q.creata) dettagli.push(`modificata il ${data(q.modificata)}`);
+  if (q.modello) dettagli.push(`scritta da ${q.modello}`);
+  dettagli.push(`si esegue su ${q.connessione}`);
+  parti.push(el("div", { className: "nota dettagli-salvataggio" }, ...dettagli.map(t => el("span", { textContent: t }))));
+
+  contenuto.replaceChildren(...parti);
+}
+
+async function rinomina() {
+  const r = await finestra({
+    titolo: "Rinomina query", conferma: "Rinomina",
+    campi: [{ nome: "titolo", etichetta: "Titolo", valore: q.titolo, obbligatorio: true }],
+    azione: v => api(`/api/query/${id}`, { titolo: v.titolo }, "PATCH"),
+  });
+  if (!r) return;
+  q = r; intestazione(); ricaricaProgetti();
+}
+
+async function sposta() {
+  const altri = elencoProgetti.filter(p => p.id !== q.progetto_id);
+  if (!altri.length) {
+    await finestra({ titolo: "Sposta query", testo: "Non ci sono altri progetti: creane uno con + nel menu.", conferma: "OK" });
+    return;
+  }
+  const r = await finestra({
+    titolo: "Sposta query", conferma: "Sposta",
+    campi: [{ nome: "progetto", etichetta: "Nuovo progetto", tipo: "scelta", valore: altri[0].id,
+              opzioni: altri.map(p => ({ valore: p.id, testo: p.nome })) }],
+    azione: v => api(`/api/query/${id}`, { progetto_id: Number(v.progetto) }, "PATCH"),
+  });
+  if (!r) return;
+  q = r; intestazione(); ricaricaProgetti();
+}
+
+async function elimina() {
+  const r = await finestra({
+    titolo: "Eliminare la query?", conferma: "Elimina", pericolo: true,
+    testo: `«${q.titolo}» sarà eliminata dal progetto ${q.progetto}.`,
+    azione: () => api(`/api/query/${id}`, undefined, "DELETE"),
+  });
+  if (r) location.href = "/";
+}
+
+// Se la query viene spostata trascinandola nel menu, si aggiorna il progetto mostrato nell'intestazione
+window.addEventListener("progetti-cambiati", async () => {
+  if (!q) return;
+  const contenitore = elencoProgetti.find(p => p.query.some(x => x.id === id));
+  if (contenitore && contenitore.id !== q.progetto_id) {
+    try { q = await api(`/api/query/${id}`); intestazione(); } catch { /* resta l'intestazione precedente */ }
+  }
+});
+
+altro.onclick = () => menuContestuale(altro, [
+  { testo: "Rinomina", icona: "modifica", azione: rinomina },
+  { testo: "Sposta in un altro progetto", icona: "sposta", azione: sposta },
+  { testo: "Elimina", icona: "cestino", pericolo: true, azione: elimina },
+]);
+
+api(`/api/query/${id}`)
+  .then(dati => { q = dati; return mostra(); })
+  .catch(e => {
+    const link = el("a", { href: "/", textContent: "Torna alla chat" });
+    contenuto.replaceChildren(el("div", { className: "introvabile" },
+      el("p", { className: "errore", textContent: e.message }), link));
+  });
+</script>
+</body>
+</html>

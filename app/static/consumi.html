@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Consumi Claude</title>
+<link rel="stylesheet" href="/static/stile.css">
+<script src="/static/menu.js"></script>
+<style>
+  .scorrimento { flex: 1; overflow-y: auto; }
+  .pagina { max-width: 1040px; margin: 0 auto; padding: 24px; }
+  h2 { font-size: 15px; font-weight: 650; margin: 28px 0 10px; }
+  .riquadri { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .riquadro { padding: 14px 16px; }
+  .riquadro .etichetta { color: var(--tenue); font-size: 13px; }
+  .riquadro .valore { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .riquadro .sotto { color: var(--tenue); font-size: 12.5px; margin-top: 2px; }
+  .barra-credito { height: 6px; border-radius: 999px; background: var(--codice); margin-top: 10px; overflow: hidden; }
+  .barra-credito i { display: block; height: 100%; background: var(--accento); border-radius: 999px; }
+  .due-colonne { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  td.domanda { max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+  .avviso { margin-top: 12px; padding: 10px 14px; border-radius: 10px; background: var(--accento-tenue); font-size: 13.5px; }
+  .avviso code { font-family: var(--mono); font-size: 12.5px; }
+  .piede { margin-top: 24px; }
+  @media (max-width: 900px) {
+    .pagina { padding: 16px 14px; }
+    .due-colonne { grid-template-columns: 1fr; gap: 0; }
+    .barra .testo-bottone { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="menu" id="menu"></aside>
+  <div class="contenuto">
+    <header class="barra">
+      <button class="bottone icona-sola hamburger" type="button"></button>
+      <div>
+        <h1>Consumi</h1>
+        <p>Stima calcolata dai token di ogni chiamata a Claude.</p>
+      </div>
+      <div class="azioni-barra">
+        <button class="bottone" id="aggiorna" type="button" title="Aggiorna"></button>
+      </div>
+    </header>
+    <div class="scorrimento">
+      <main class="pagina" id="contenuto"><p class="nota">Caricamento…</p></main>
+    </div>
+  </div>
+</div>
+<script>
+const contenuto = document.getElementById("contenuto");
+const aggiorna = document.getElementById("aggiorna");
+aggiorna.innerHTML = icona("aggiorna") + '<span class="testo-bottone">Aggiorna</span>';
+
+const usd = v => v == null ? "—" : "$ " + (Math.abs(v) < 1 ? v.toFixed(4) : v.toFixed(2));
+const numero = v => (v ?? 0).toLocaleString("it-IT");
+const ora = iso => new Date(iso).toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" });
+
+function riquadro(etichetta, valore, sotto, extra) {
+  return el("div", { className: "scheda riquadro" },
+    el("div", { className: "etichetta", textContent: etichetta }),
+    el("div", { className: "valore", textContent: valore }),
+    sotto ? el("div", { className: "sotto", textContent: sotto }) : "",
+    extra || "");
+}
+
+function tabella(colonne, righe) {
+  const t = el("table");
+  t.append(el("thead", {}, el("tr", {}, ...colonne.map(([nome, cls]) => el("th", { textContent: nome, className: cls || "" })))));
+  const corpo = el("tbody");
+  for (const riga of righe) {
+    corpo.append(el("tr", {}, ...riga.map((v, i) => el("td", { textContent: v, className: colonne[i][1] || "", title: String(v) }))));
+  }
+  t.append(corpo);
+  return el("div", { className: "tabella" }, t);
+}
+
+function mostra(d) {
+  const t = d.totale;
+  const parti = [];
+
+  const riquadri = [riquadro("Speso (stima)", usd(t.costo_usd), `${numero(t.chiamate)} chiamate all'API`)];
+  if (d.credito_residuo_usd != null) {
+    const quota = Math.max(0, Math.min(1, d.credito_residuo_usd / d.credito_iniziale_usd));
+    const barra = el("div", { className: "barra-credito" }, el("i", { style: `width:${(quota * 100).toFixed(1)}%` }));
+    riquadri.push(riquadro("Credito residuo (stima)", usd(d.credito_residuo_usd), `su ${usd(d.credito_iniziale_usd)} acquistati`, barra));
+  }
+  riquadri.push(riquadro("Domande", numero(t.domande)));
+  riquadri.push(riquadro("Costo medio per domanda", t.domande ? usd(t.costo_usd / t.domande) : "—"));
+  parti.push(el("div", { className: "riquadri" }, ...riquadri));
+
+  if (d.credito_residuo_usd == null) {
+    const avviso = el("div", { className: "avviso" });
+    avviso.append("Per vedere il credito residuo stimato aggiungi ", el("code", { textContent: "CREDITO_INIZIALE_USD" }),
+      " al file .env (il credito acquistato) e riavvia il server.");
+    parti.push(avviso);
+  }
+
+  const giorni = el("section", {}, el("h2", { textContent: "Per giorno (UTC)" }),
+    d.giorni.length
+      ? tabella([["Giorno"], ["Domande", "num"], ["Costo", "num"]], d.giorni.map(g => [g.giorno, numero(g.domande), usd(g.costo_usd)]))
+      : el("p", { className: "nota", textContent: "Nessuna chiamata registrata." }));
+  const token = el("section", {}, el("h2", { textContent: "Token" }),
+    tabella([["Tipo"], ["Token", "num"]], [
+      ["Input (non in cache)", numero(t.input)],
+      ["Scritti in cache", numero(t.cache_scrittura)],
+      ["Letti dalla cache", numero(t.cache_lettura)],
+      ["Output (incluso il ragionamento)", numero(t.output)],
+    ]));
+  parti.push(el("div", { className: "due-colonne" }, giorni, token));
+
+  if (d.domande.length) {
+    parti.push(el("h2", { textContent: `Ultime ${d.domande.length} domande` }));
+    parti.push(tabella(
+      [["Quando"], ["Domanda", "domanda"], ["Modello"], ["Chiamate", "num"], ["Token in", "num"], ["Token out", "num"], ["Costo", "num"]],
+      d.domande.map(q => [ora(q.ora), q.domanda, q.modello, numero(q.chiamate), numero(q.token_input), numero(q.token_output), usd(q.costo_usd)])));
+  }
+
+  const note = ["Il saldo esatto è nella console di Anthropic (Impostazioni → Fatturazione): questa pagina conta solo le chiamate fatte da questa app."];
+  if (t.senza_prezzo) note.push(`${t.senza_prezzo} chiamate usano un modello senza prezzo nel listino dell'app e non sono nel totale.`);
+  parti.push(el("p", { className: "nota piede", textContent: note.join(" ") }));
+
+  contenuto.replaceChildren(...parti);
+}
+
+async function carica() {
+  aggiorna.disabled = true;
+  try {
+    const r = await fetch("/api/consumi");
+    if (!r.ok) throw new Error(`Errore ${r.status}`);
+    mostra(await r.json());
+  } catch (e) {
+    contenuto.replaceChildren(el("p", { className: "errore", textContent: e.message }));
+  }
+  aggiorna.disabled = false;
+}
+
+aggiorna.onclick = carica;
+carica();
+</script>
+</body>
+</html>

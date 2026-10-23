@@ -1,0 +1,10 @@
+# Regole di business
+
+Rinomina questo file in `contesto.md` e scrivi qui solo ciò che Claude non può
+capire guardando il database. Lo schema non serve: lo esplora da solo.
+
+- Un ordine è valido solo se `ordini.stato` è 2, 3 o 4 (1 = bozza, 5 = annullato).
+- "Fatturato" = somma di `ordini.totale` degli ordini validi, meno i resi (tabella `resi`).
+- Gli importi sono in centesimi di euro, IVA inclusa.
+- Escludi sempre i clienti di test (email che finisce con @test.it).
+- Le date sono in UTC; gli utenti ragionano in ora italiana.
